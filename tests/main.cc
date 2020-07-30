@@ -20,6 +20,7 @@
 #endif
 
 #include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/xml_parser.hpp>
 
 #ifdef BOOST_MPL_LIMIT_VECTOR_SIZE_PUSH
 #pragma pop_macro("BOOST_MPL_LIMIT_VECTOR_SIZE")
@@ -48,10 +49,13 @@ int main(int, char**) {
 
   // Search talos_reduced_wpg.urdf
   string filename="";
+  string srdf_filename="";
   for (auto test_path : paths)
   {
     filename = test_path +
-        string("/share/talos_data/urdf/talos_reduced_wpg.urdf");
+        string("/share/talos_data/urdf/talos_reduced_v2.urdf");
+    srdf_filename = test_path +
+        string("/share/talos_data/srdf/talos_wpg.srdf");
     if ( boost::filesystem::exists(filename))
       break;
 
@@ -70,10 +74,10 @@ int main(int, char**) {
   oss << talos_reduced_wpg_file.rdbuf();
 
   // Name of the parameter
-  string lparameter_name("/robot_description");
+  const string lparameter_name("/robot_description");
 
   // Model of the robot inside a string.
-  string lrobot_description = oss.str();
+  const string lrobot_description = oss.str();
 
   std::shared_ptr<std::vector<std::string>>
       alist_of_robots = dynamicgraph::sot::getListOfRobots();
@@ -87,18 +91,17 @@ int main(int, char**) {
   // Reading the parameter.
   string model_name("robot");
 
-  // Search for the robot util related to robot_name.
-  dynamicgraph::sot::RobotUtilShrPtr aRobotUtil =
-      dynamicgraph::sot::getRobotUtil(model_name);
+  // Create the robot util related to robot_name.
+  dynamicgraph::sot::RobotUtilShrPtr aRobotUtil = dynamicgraph::sot::createRobotUtil(model_name);
 
   std::cout << dynamicgraph::sot::RefVoidRobotUtil() << std::endl;
-  std::cout << aRobotUtil.get() << std::endl;
-  if (aRobotUtil == dynamicgraph::sot::RefVoidRobotUtil())
-    aRobotUtil = dynamicgraph::sot::createRobotUtil(model_name);
   std::cout << aRobotUtil.get() << std::endl;
 
   // Then build the complete robot model.
   aRobotUtil->set_parameter<string>(lparameter_name,lrobot_description);
+
+  // Set the SRDF file
+  aPG.setSRDFFile(srdf_filename);
 
   // Build the pattern generator
   aPG.buildPGI();

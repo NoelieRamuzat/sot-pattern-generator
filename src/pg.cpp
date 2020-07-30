@@ -28,6 +28,7 @@
 //#define VP_DEBUG_MODE 45
 #include <pinocchio/fwd.hpp>
 
+#include <sstream>
 #include <stdexcept>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
@@ -648,7 +649,7 @@ bool PatternGenerator::InitState(void) {
 bool PatternGenerator::buildReducedModel(void) {
 
   // Name of the parameter
-  std::string lparameter_name("/robot_description");
+  const std::string lparameter_name("/robot_description");
 
   // Model of the robot inside a string.
   std::string lrobot_description;
@@ -697,12 +698,13 @@ bool PatternGenerator::buildReducedModel(void) {
   for(auto it : list_of_joints_to_lock_by_name)
   {
     const std::string & joint_name = it;
-    if(m_robotModel.existJointName(joint_name))
+    if(lrobotModel.existJointName(joint_name)){
       // do not consider joint that are not in the model
       list_of_joints_to_lock_by_id.
-          push_back(m_robotModel.getJointId(joint_name));
+          push_back(lrobotModel.getJointId(joint_name));
+    }
   }
-  m_robotModel = pinocchio::buildReducedModel(m_robotModel,
+  m_robotModel = pinocchio::buildReducedModel(lrobotModel,
                                               list_of_joints_to_lock_by_id,
                                               q_neutral);
 
@@ -717,58 +719,142 @@ bool PatternGenerator::buildPGI(void) {
   // Build the reduced model of the robot
   buildReducedModel();
 
-  // Creating the humanoid robot.
-  m_PR = new pg::PinocchioRobot();
-  m_PR->initializeRobotModelAndData(&m_robotModel, m_robotData);
-
-  // Read xml/srdf stream
   using boost::property_tree::ptree;
   ptree pt;
+  std::ifstream srdf_stream(m_srdfFile.c_str());
+
   try {
-
-    // Initialize the Right Foot
-    pg::PRFoot aFoot;
-    string path = "/robot/specificities/feet/right/size";
-    BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
-      aFoot.soleHeight = v.second.get<double>("height");
-      aFoot.soleWidth = v.second.get<double>("width");
-      aFoot.soleDepth = v.second.get<double>("depth");
-    }
-
-    path = "/robot/specificities/feet/right/anklePosition";
-    BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
-      aFoot.anklePosition(0) = v.second.get<double>("x");
-      aFoot.anklePosition(1) = v.second.get<double>("y");
-      aFoot.anklePosition(2) = v.second.get<double>("z");
-    }
-
-    pinocchio::FrameIndex ra = m_robotModel.getFrameId("r_ankle");
-    aFoot.associatedAnkle = m_robotModel.frames.at(ra).parent;
-    m_PR->initializeRightFoot(aFoot);
-
-    // Initialize the Left Foot
-    path = "/robot/specificities/feet/left/size";
-    BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
-      aFoot.soleHeight = v.second.get<double>("height");
-      aFoot.soleWidth = v.second.get<double>("width");
-      aFoot.soleDepth = v.second.get<double>("depth");
-    }  // BOOST_FOREACH
-
-    path = "/robot/specificities/feet/left/anklePosition";
-    BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
-      aFoot.anklePosition(0) = v.second.get<double>("x");
-      aFoot.anklePosition(1) = v.second.get<double>("y");
-      aFoot.anklePosition(2) = v.second.get<double>("z");
-    }  // BOOST_FOREACH
-
-    pinocchio::FrameIndex la = m_robotModel.getFrameId("l_ankle");
-    aFoot.associatedAnkle = m_robotModel.frames.at(la).parent;
-    m_PR->initializeLeftFoot(aFoot);
-
-  } catch (...) {
-    cerr << "problem while reading the srdf file. File corrupted?" << endl;
-    ok = false;
+    boost::property_tree::read_xml(srdf_stream, pt);
+  } catch(const boost::property_tree::ptree_error &e){
+    SOT_THROW ExceptionPatternGenerator(
+      ExceptionPatternGenerator::PATTERN_GENERATOR_JRL,
+      "Error during read_xml for the WPG, exception: " + *e.what());
   }
+  // Initialize the Right Foot
+  pg::PRFoot aFootRight;
+  string path = "robot.specificities.feet.right.size";
+  BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+    aFootRight.soleHeight = v.second.get<double>("height");
+    aFootRight.soleWidth = v.second.get<double>("width");
+    aFootRight.soleDepth = v.second.get<double>("depth");
+  }
+
+  path = "robot.specificities.feet.right.anklePosition";
+  BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+    aFootRight.anklePosition(0) = v.second.get<double>("x");
+    aFootRight.anklePosition(1) = v.second.get<double>("y");
+    aFootRight.anklePosition(2) = v.second.get<double>("z");
+  }
+
+  std::string frameName;
+  pinocchio::FrameIndex ra;
+  if (m_robotModel.existFrame("r_ankle")){
+    ra = m_robotModel.getFrameId("r_ankle");
+  } else {
+    try {
+      path = "robot.specificities.feet.right.frameName";
+      BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+        frameName = v.second.get<std::string>("name");
+      }
+      ra = m_robotModel.getFrameId(frameName);
+      m_robotModel.frames[ra].name = "r_ankle";
+    } catch (...){
+      SOT_THROW ExceptionPatternGenerator(
+      ExceptionPatternGenerator::PATTERN_GENERATOR_JRL,
+      "Error while getting the frame id of the r_ankle, \
+       no frame r_ankle in the model and no frameName in the srdf, for the WPG.");
+    }
+  }  
+
+  // Initialize the Left Foot
+  pg::PRFoot aFootLeft;
+  path = "robot.specificities.feet.left.size";
+  BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+    aFootLeft.soleHeight = v.second.get<double>("height");
+    aFootLeft.soleWidth = v.second.get<double>("width");
+    aFootLeft.soleDepth = v.second.get<double>("depth");
+  }  // BOOST_FOREACH
+
+  path = "robot.specificities.feet.left.anklePosition";
+  BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+    aFootLeft.anklePosition(0) = v.second.get<double>("x");
+    aFootLeft.anklePosition(1) = v.second.get<double>("y");
+    aFootLeft.anklePosition(2) = v.second.get<double>("z");
+  }  // BOOST_FOREACH
+
+  pinocchio::FrameIndex la;
+  if (m_robotModel.existFrame("l_ankle")){
+    la = m_robotModel.getFrameId("l_ankle");
+  } else {
+    try {
+      path = "robot.specificities.feet.left.frameName";
+      BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+        frameName = v.second.get<std::string>("name");
+      }
+      la = m_robotModel.getFrameId(frameName);
+      m_robotModel.frames[la].name = "l_ankle";
+    } catch (...){
+      SOT_THROW ExceptionPatternGenerator(
+      ExceptionPatternGenerator::PATTERN_GENERATOR_JRL,
+      "Error while getting the frame id of the l_ankle, \
+       no frame l_ankle in the model and no frameName in the srdf, for the WPG.");
+    }
+  }
+  
+  if (!m_robotModel.existFrame("r_wrist")){
+    try {
+      path = "robot.specificities.wrists.right.frameName";
+      BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+        frameName = v.second.get<std::string>("name");
+      }
+      pinocchio::FrameIndex rw = m_robotModel.getFrameId(frameName);
+      m_robotModel.frames[rw].name = "r_wrist";
+    } catch (...){
+      SOT_THROW ExceptionPatternGenerator(
+      ExceptionPatternGenerator::PATTERN_GENERATOR_JRL,
+      "Error while getting the frame id of the r_wrist, \
+       no frame r_wrist in the model and no frameName in the srdf, for the WPG.");
+    }
+  }
+  if (!m_robotModel.existFrame("l_wrist")){
+    try {
+      path = "robot.specificities.wrists.left.frameName";
+      BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+        frameName = v.second.get<std::string>("name");
+      }
+      pinocchio::FrameIndex lw = m_robotModel.getFrameId(frameName);
+      m_robotModel.frames[lw].name = "l_wrist";
+    } catch (...){
+      SOT_THROW ExceptionPatternGenerator(
+      ExceptionPatternGenerator::PATTERN_GENERATOR_JRL,
+      "Error while getting the frame id of the l_wrist, \
+       no frame l_wrist in the model and no frameName in the srdf, for the WPG.");
+    }
+  }
+  if (!m_robotModel.existFrame("torso")){
+    try {
+      path = "robot.specificities.torso.frameName";
+      BOOST_FOREACH (const ptree::value_type &v, pt.get_child(path.c_str())) {
+        frameName = v.second.get<std::string>("name");
+      }
+      pinocchio::FrameIndex torsoId = m_robotModel.getFrameId(frameName);
+      m_robotModel.frames[torsoId].name = "torso";
+    } catch (...){
+      SOT_THROW ExceptionPatternGenerator(
+      ExceptionPatternGenerator::PATTERN_GENERATOR_JRL,
+      "Error while getting the frame id of the torso, \
+       no frame torso in the model and no frameName in the srdf, for the WPG.");
+    }
+  }
+
+  // Creating the humanoid robot.
+  m_PR = new pg::PinocchioRobot();
+  m_robotData = new pinocchio::Data(m_robotModel);
+  m_PR->initializeRobotModelAndData(&m_robotModel, m_robotData);
+  aFootRight.associatedAnkle = m_robotModel.frames.at(ra).parent;
+  m_PR->initializeRightFoot(aFootRight);
+  aFootLeft.associatedAnkle = m_robotModel.frames.at(la).parent;
+  m_PR->initializeLeftFoot(aFootLeft);
 
   if (m_PR != 0) {
     pg::PRFoot *rightFoot = m_PR->rightFoot();
@@ -789,9 +875,7 @@ bool PatternGenerator::buildPGI(void) {
   }
   try {
     m_PGI = PatternGeneratorJRL::patternGeneratorInterfaceFactory(m_PR);
-  }
-
-  catch (...) {
+  } catch (...) {
     SOT_THROW ExceptionPatternGenerator(
         ExceptionPatternGenerator::PATTERN_GENERATOR_JRL,
         "Error while allocating the Pattern Generator.",
