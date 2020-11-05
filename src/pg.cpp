@@ -27,7 +27,7 @@
 //#define VP_DEBUG
 //#define VP_DEBUG_MODE 45
 #include <pinocchio/fwd.hpp>
-
+#include <pinocchio/algorithm/centroidal.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <boost/property_tree/ptree.hpp>
@@ -122,6 +122,16 @@ PatternGenerator::PatternGenerator(const std::string &name)
                    "PatternGenerator(" + name + ")::output(vector)::ddcomref")
 
       ,
+      AMRefSOUT(boost::bind(&PatternGenerator::getAMRef, this, _1, _2),
+                 OneStepOfControlS,
+                 "PatternGenerator(" + name + ")::output(vector)::amref")
+
+      ,
+      dAMRefSOUT(boost::bind(&PatternGenerator::getdAMRef, this, _1, _2),
+                  OneStepOfControlS,
+                  "PatternGenerator(" + name + ")::output(vector)::damref")
+
+      ,
       comSIN(NULL, "PatternGenerator(" + name + ")::input(vector)::com")
 
       ,
@@ -197,11 +207,15 @@ PatternGenerator::PatternGenerator(const std::string &name)
           OneStepOfControlS,
           "PatternGenerator(" + name + ")::output(uint)::SupportFoot"),
       jointWalkingErrorPositionSOUT(
-          boost::bind(&PatternGenerator::getjointWalkingErrorPosition, this, _1,
-                      _2),
+          boost::bind(&PatternGenerator::getjointWalkingErrorPosition, this, _1, _2),
           OneStepOfControlS,
-          "PatternGenerator(" + name +
-              ")::output(vector)::walkingerrorposition")
+          "PatternGenerator(" + name + ")::output(vector)::walkingerrorposition")
+
+      ,
+      jointPositionFromPGSOUT(
+          boost::bind(&PatternGenerator::getJointPositionFromPG, this, _1, _2),
+          OneStepOfControlS,
+          "PatternGenerator(" + name + ")::output(vector)::jointpositionfrompg")
 
       ,
       comattitudeSOUT(
@@ -351,6 +365,10 @@ PatternGenerator::PatternGenerator(const std::string &name)
   m_PrevSamplingddCOMRefPos.fill(0.0);
   m_NextSamplingddCOMRefPos.resize(3);
   m_NextSamplingddCOMRefPos.fill(0.0);
+  m_AMRef.resize(3);
+  m_AMRef.fill(0.0);
+  m_dAMRef.resize(3);
+  m_dAMRef.fill(0.0);
   m_InitZMPRefPos.resize(3);
   m_InitZMPRefPos.fill(0);
   m_InitCOMRefPos.resize(3);
@@ -466,7 +484,7 @@ PatternGenerator::PatternGenerator(const std::string &name)
   signalRegistration(jointPositionSIN << motorControlJointPositionSIN
                                       << ZMPPreviousControllerSIN << ZMPRefSOUT
                                       << CoMRefSOUT << dCoMRefSOUT
-                                      << ddCoMRefSOUT);
+                                      << ddCoMRefSOUT << AMRefSOUT << dAMRefSOUT);
 
   signalRegistration(comStateSIN << zmpSIN << forceSIN << forceSOUT);
 
@@ -475,6 +493,7 @@ PatternGenerator::PatternGenerator(const std::string &name)
                             << LeftFootRefSOUT << RightFootRefSOUT);
 
   signalRegistration(SupportFootSOUT << jointWalkingErrorPositionSOUT
+                                     << jointPositionFromPGSOUT
                                      << comattitudeSOUT << dcomattitudeSOUT
                                      << ddcomattitudeSOUT << waistattitudeSOUT
                                      << waistattitudematrixabsoluteSOUT);
@@ -550,7 +569,6 @@ bool PatternGenerator::InitState(void) {
   Vector com = comSIN(m_LocalTime);
 
   m_JointErrorValuesForWalking.resize(res.size());
-
   sotDEBUG(5) << "m_LocalTime:" << m_LocalTime << endl;
   sotDEBUG(5) << "Joint Values:" << res << endl;
 
@@ -559,7 +577,6 @@ bool PatternGenerator::InitState(void) {
     bres.resize(res.size());
     for (int i = 0; i < res.size(); i++) bres(i) = res(i);
     m_PGI->SetCurrentJointValues(bres);
-
     // Evaluate current position of the COM, ZMP and feet
     // according to the state of the robot.
     PatternGeneratorJRL::COMState lStartingCOMState;
@@ -707,7 +724,7 @@ bool PatternGenerator::buildReducedModel(void) {
   m_robotModel = pinocchio::buildReducedModel(lrobotModel,
                                               list_of_joints_to_lock_by_id,
                                               q_neutral);
-
+  std::cout << "############# m_robotModel : " << m_robotModel << std::endl;
   return true;
 }
 
@@ -973,6 +990,26 @@ Vector &PatternGenerator::getddCoMRef(Vector &CoMRefval, int time) {
 
   sotDEBUGOUT(25);
   return CoMRefval;
+}
+
+Vector &PatternGenerator::getAMRef(Vector &AMRefval, int time) {
+  sotDEBUGIN(25);
+
+  OneStepOfControlS(time);
+  AMRefval = m_AMRef;
+
+  sotDEBUGOUT(25);
+  return AMRefval;
+}
+
+Vector &PatternGenerator::getdAMRef(Vector &dAMRefval, int time) {
+  sotDEBUGIN(25);
+
+  OneStepOfControlS(time);
+  dAMRefval = m_dAMRef;
+
+  sotDEBUGOUT(25);
+  return dAMRefval;
 }
 
 Vector &PatternGenerator::getExternalForces(Vector &forces, int time) {
@@ -1489,6 +1526,27 @@ int &PatternGenerator::OneStepOfControl(int &dummy, int time) {
         m_ddCOMRefPos(1) = lCOMRefState.y[2];
         m_ddCOMRefPos(2) = lCOMRefState.z[2];
 
+        m_PR->currentRPYConfiguration(CurrentConfiguration);
+        m_PR->currentRPYVelocity(CurrentVelocity);
+        m_PR->currentRPYAcceleration(CurrentAcceleration);
+        m_PR->computeForwardKinematics();
+        // m_PR->computeCentroidalMapTimeVariation();
+        m_robotModel = *m_PR->Model();
+        m_robotData = m_PR->Data();
+        // const Matrix & J_am = m_robotData->Ag;
+        // const Matrix & dJ_am = m_robotData->dAg;
+        // std::cout << "############# J_am : " << J_am << " ############## " << std::endl;
+        // std::cout << "############# dJ_am : " << dJ_am << " ############## " << std::endl;
+        // m_AMRef = J_am.bottomRows(3) * m_dCOMRefPos;
+        // m_dAMRef = dJ_am.bottomRows(3) * m_dCOMRefPos + J_am.bottomRows(3) * m_ddCOMRefPos;
+
+        m_AMRef = pinocchio::computeCentroidalMomentum(m_robotModel, 
+                                                       *m_robotData).angular();
+
+        m_dAMRef = pinocchio::computeCentroidalMomentumTimeVariation(m_robotModel, 
+                                                                     *m_robotData).angular();
+        m_CurrentConfiguration = CurrentConfiguration;
+
         m_ComAttitude(0) = lCOMRefState.roll[0];
         m_ComAttitude(1) = lCOMRefState.pitch[0];
         m_ComAttitude(2) = lCOMRefState.yaw[0];
@@ -1968,6 +2026,15 @@ Vector &PatternGenerator::getjointWalkingErrorPosition(Vector &res, int time) {
   sotDEBUGIN(5);
   OneStepOfControlS(time);
   res = m_JointErrorValuesForWalking;
+  sotDEBUGOUT(5);
+
+  return res;
+}
+
+Vector &PatternGenerator::getJointPositionFromPG(Vector &res, int time) {
+  sotDEBUGIN(5);
+  OneStepOfControlS(time);
+  res = m_CurrentConfiguration;
   sotDEBUGOUT(5);
 
   return res;

@@ -272,6 +272,12 @@ class PatternGenerator_EXPORT PatternGenerator : public Entity {
   /*! \brief Internal method to get the reference ddCoM at a given time.*/
   dynamicgraph::Vector &getddCoMRef(dynamicgraph::Vector &res, int time);
 
+  /*! \brief Internal method to get the reference Angular Momentum at a given time.*/
+  dynamicgraph::Vector &getAMRef(dynamicgraph::Vector &res, int time);
+
+  /*! \brief Internal method to get the reference dAM at a given time.*/
+  dynamicgraph::Vector &getdAMRef(dynamicgraph::Vector &res, int time);
+
   /*! \brief Internal method to get the external forces at a given time.*/
   dynamicgraph::Vector &getExternalForces(dynamicgraph::Vector &forces,
                                           int time);
@@ -291,8 +297,11 @@ class PatternGenerator_EXPORT PatternGenerator : public Entity {
   /*! \brief Internal method to get the position of the flying foot. */
   MatrixHomogeneous &getFlyingFootRef(MatrixHomogeneous &res, int time);
 
-  /*! \brief Internal method to get the joint position for walking. */
+  /*! \brief Internal method to get the joint error position for walking. */
   dynamicgraph::Vector &getjointWalkingErrorPosition(dynamicgraph::Vector &res,
+                                                     int time);
+  /*! \brief Internal method to get the joint position computed by PG for walking. */
+  dynamicgraph::Vector &getJointPositionFromPG(dynamicgraph::Vector &res,
                                                      int time);
 
   /*! \brief Internal method to get the derivative of the com attitude. */
@@ -397,6 +406,12 @@ class PatternGenerator_EXPORT PatternGenerator : public Entity {
   dynamicgraph::Vector m_ddCOMRefPos;
   dynamicgraph::Vector m_PrevSamplingddCOMRefPos;
   dynamicgraph::Vector m_NextSamplingddCOMRefPos;
+  
+  /*! \brief Reference Angular Momentum. */
+  dynamicgraph::Vector m_AMRef;
+
+  /*! \brief Reference Angular Momentum derivative. */
+  dynamicgraph::Vector m_dAMRef;
 
   /*! \brief Initial Absolute position of the reference ZMP. */
   dynamicgraph::Vector m_InitZMPRefPos;
@@ -425,8 +440,12 @@ class PatternGenerator_EXPORT PatternGenerator : public Entity {
   /*! \brief Waist Attitude Homogeneous Matrix */
   MatrixHomogeneous m_WaistAttitudeMatrixAbsolute;
 
-  /*! \brief Joint values for walking. */
+  /*! \brief Joint error values for walking 
+  (between current configuration and the one computed by PG). */
   dynamicgraph::Vector m_JointErrorValuesForWalking;
+
+  /*! \brief Joint values computed by PG for walking. */
+  dynamicgraph::Vector m_CurrentConfiguration;
 
   /*! \brief Velocity reference for Herdt's PG */
   dynamicgraph::Vector m_VelocityReference;
@@ -534,10 +553,17 @@ class PatternGenerator_EXPORT PatternGenerator : public Entity {
   /*! \brief Externalize the CoM reference. */
   SignalTimeDependent<dynamicgraph::Vector, int> CoMRefSOUT;
 
-  /*! \brief Externalize the CoM reference. */
+  /*! \brief Externalize the dCoM reference. */
   SignalTimeDependent<dynamicgraph::Vector, int> dCoMRefSOUT;
 
   SignalTimeDependent<dynamicgraph::Vector, int> ddCoMRefSOUT;
+
+  /*! \brief Externalize the AM reference. */
+  SignalTimeDependent<dynamicgraph::Vector, int> AMRefSOUT;
+
+  /*! \brief Externalize the dAM reference. */
+  SignalTimeDependent<dynamicgraph::Vector, int> dAMRefSOUT;
+
   /*! \brief Take the current CoM. */
   SignalPtr<dynamicgraph::Vector, int> comSIN;
 
@@ -587,8 +613,11 @@ class PatternGenerator_EXPORT PatternGenerator : public Entity {
   /*! \brief Externalize the support foot. */
   SignalTimeDependent<unsigned int, int> SupportFootSOUT;
 
-  /*! \brief Externalize the joint values for walking. */
+  /*! \brief Externalize the joint error values for walking. */
   SignalTimeDependent<dynamicgraph::Vector, int> jointWalkingErrorPositionSOUT;
+
+    /*! \brief Externalize the joint values computed by PG for walking. */
+  SignalTimeDependent<dynamicgraph::Vector, int> jointPositionFromPGSOUT;
 
   /*! \brief Externalize the com attitude. */
   SignalTimeDependent<dynamicgraph::Vector, int> comattitudeSOUT;
